@@ -1,0 +1,48 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Flutter Web",
+            "type": "shell",
+            "command": "flutter",
+            "args": [
+                "run",
+                "-d",
+                "chrome",
+                "--web-port",
+                "8080"
+            ],
+            "group": "test",
+            "options": {
+                "cwd": "${workspaceFolder}/flutter_frontend"
+            },
+            "isBackground": true
+        },
+        {
+            "label": "Python Backend",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "main.py"
+            ],
+            "group": "test",
+            "options": {
+                "cwd": "${workspaceFolder}/python_backend"
+            },
+            "isBackground": true
+        },
+        {
+            "label": "React App",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "start"
+            ],
+            "group": "test",
+            "options": {
+                "cwd": "${workspaceFolder}/react_frontend"
+            },
+            "isBackground": true
+        }
+    ]
+}

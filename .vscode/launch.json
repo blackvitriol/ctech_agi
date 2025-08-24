@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Flutter Web",
+            "type": "dart",
+            "request": "launch",
+            "program": "${workspaceFolder}/flutter_frontend/lib/main.dart",
+            "cwd": "${workspaceFolder}/flutter_frontend",
+            "args": [
+                "--web-port",
+                "8080"
+            ],
+            "deviceId": "chrome"
+        },
+        {
+            "name": "Python Backend",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python_backend/main.py",
+            "cwd": "${workspaceFolder}/python_backend",
+            "console": "integratedTerminal"
+        },
+    ]
+}

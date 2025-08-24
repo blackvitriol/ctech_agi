@@ -1,0 +1,45 @@
+name: flutter_frontend
+description: "AI Agent - Flutter Web Application"
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  get: ^4.6.6
+
+  # WebRTC functionality for Flutter Web
+  flutter_webrtc: ^1.1.0
+
+  # WebSocket communication with backend
+  web_socket_channel: ^2.4.0
+
+  # HTTP requests for server testing
+  http: ^1.1.0
+
+  # Device sensors (web compatible)
+  sensors_plus: ^4.0.2
+
+  # Device information and specifications (web compatible)
+  device_info_plus: ^10.1.0
+  package_info_plus: ^8.0.2
+
+  # Web-specific packages
+  universal_html: ^2.2.4
+
+  # The following adds the Cupertino Icons font to your application.
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

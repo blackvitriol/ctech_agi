@@ -1,0 +1,54 @@
+{
+    "folders": [
+        {
+            "name": "🌐 WebRTC Project",
+            "path": "."
+        },
+        {
+            "name": "📱 Flutter Frontend",
+            "path": "./flutter_frontend"
+        },
+        {
+            "name": "🐍 Python Backend",
+            "path": "./python_backend"
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "./python_backend/venv/Scripts/python.exe",
+        "python.terminal.activateEnvironment": true,
+        "dart.flutterSdkPath": null,
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/*.pyc": true,
+            "**/.dart_tool": true,
+            "**/build": true
+        },
+        "search.exclude": {
+            "**/venv": true,
+            "**/.dart_tool": true,
+            "**/build": true
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "Dart-Code.dart-code",
+            "Dart-Code.flutter",
+            "ms-python.python",
+            "ms-python.vscode-pylance"
+        ]
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "🚀 Start Full Stack",
+                "dependsOrder": "parallel",
+                "dependsOn": [
+                    "Start Python Backend",
+                    "Flutter Get Dependencies"
+                ],
+                "group": "build"
+            }
+        ]
+    }
+}
