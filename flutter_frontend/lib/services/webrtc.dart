@@ -3,6 +3,11 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'websocket_service.dart';
 
 class WebRTCService {
+  // Singleton pattern to share connection across pages
+  static final WebRTCService _instance = WebRTCService._internal();
+  factory WebRTCService() => _instance;
+  WebRTCService._internal();
+
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   final WebSocketService _webSocketService = WebSocketService();
@@ -11,6 +16,7 @@ class WebRTCService {
 
   MediaStream? _localStream;
   RTCPeerConnection? _peerConnection;
+  RTCDataChannel? _dataChannel;
   bool _isInitialized = false;
   String? _currentRoomId;
   String? _currentUserId;
@@ -20,6 +26,7 @@ class WebRTCService {
   RTCVideoRenderer get remoteRenderer => _remoteRenderer;
   MediaStream? get localStream => _localStream;
   RTCPeerConnection? get peerConnection => _peerConnection;
+  RTCDataChannel? get dataChannel => _dataChannel;
   bool get isInitialized => _isInitialized;
   bool get isConnected => _webSocketService.isConnected;
   String? get currentRoomId => _currentRoomId;
@@ -28,6 +35,9 @@ class WebRTCService {
 
   // Initialize renderers and WebSocket callbacks
   Future<void> initializeRenderers() async {
+    if (_isInitialized) {
+      return;
+    }
     await _localRenderer.initialize();
     await _remoteRenderer.initialize();
     _isInitialized = true;
@@ -234,6 +244,23 @@ class WebRTCService {
     // Create peer connection using the correct API
     _peerConnection = await createPeerConnection(configuration, {});
 
+    // Receive remote data channel created by the peer
+    _peerConnection!.onDataChannel = (RTCDataChannel channel) {
+      print('Remote DataChannel received: ${channel.label}');
+      _dataChannel = channel;
+      _attachDataChannelHandlers(channel);
+    };
+
+    // Proactively create a data channel for chat/control
+    final dcInit = RTCDataChannelInit();
+    dcInit.ordered = true;
+    try {
+      _dataChannel = await _peerConnection!.createDataChannel('chat', dcInit);
+      _attachDataChannelHandlers(_dataChannel!);
+    } catch (e) {
+      print('Failed to create data channel: $e');
+    }
+
     _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
       print('New ICE candidate: ${candidate.toMap()}');
       // Send ICE candidate to remote peer via signaling server
@@ -253,6 +280,15 @@ class WebRTCService {
         _peerConnection!.addTrack(track);
       }
     }
+  }
+
+  void _attachDataChannelHandlers(RTCDataChannel channel) {
+    channel.onMessage = (RTCDataChannelMessage message) {
+      print('DataChannel message received: ${message.text}');
+    };
+    channel.onDataChannelState = (RTCDataChannelState state) {
+      print('DataChannel state: $state');
+    };
   }
 
   // Create offer and send via signaling server
@@ -280,6 +316,28 @@ class WebRTCService {
     }
   }
 
+  // Send chat message over DataChannel
+  Future<bool> sendChatMessage(String text) async {
+    try {
+      if (_dataChannel == null ||
+          _dataChannel!.state != RTCDataChannelState.RTCDataChannelOpen) {
+        print('DataChannel not open');
+        return false;
+      }
+      final payload = {
+        'type': 'chat',
+        'text': text,
+        'timestamp': DateTime.now().toIso8601String(),
+        'from': _currentUserId ?? 'unknown'
+      };
+      _dataChannel!.send(RTCDataChannelMessage(payload.toString()));
+      return true;
+    } catch (e) {
+      print('Failed to send chat message: $e');
+      return false;
+    }
+  }
+
   // Stop local stream
   void stopLocalStream() {
     if (_localStream != null) {
@@ -296,13 +354,16 @@ class WebRTCService {
     _peerConnection = null;
   }
 
-  // Dispose resources
-  void dispose() {
-    _localRenderer.dispose();
-    _remoteRenderer.dispose();
-    _localStream?.dispose();
-    _peerConnection?.dispose();
-    // Fire and forget - we can't await in dispose
-    _webSocketService.disconnectFromSignalingServer();
+  // Dispose: no-op to preserve shared connection/renderers across tabs
+  void dispose() {}
+
+  // Explicit shutdown if you really want to terminate everything
+  Future<void> shutdown() async {
+    try {
+      stopLocalStream();
+      _peerConnection?.close();
+      _peerConnection = null;
+    } catch (_) {}
+    await _webSocketService.disconnectFromSignalingServer();
   }
 }

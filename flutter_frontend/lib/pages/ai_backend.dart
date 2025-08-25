@@ -5,7 +5,13 @@ import 'package:get/get.dart' as getx;
 import '../services/device_info_service.dart';
 import '../services/permission_service.dart';
 import '../services/webrtc.dart';
-import '../widgets/collapsible_section.dart';
+import 'video_fullscreen_page.dart';
+import '../widgets/ai_backend/connection_settings_section.dart';
+import '../widgets/ai_backend/device_settings_section.dart';
+import '../widgets/ai_backend/ai_models_section.dart';
+import '../widgets/ai_backend/video_grid_section.dart';
+import '../widgets/ai_backend/connection_logs_section.dart';
+import '../widgets/ai_backend/ai_services_section.dart';
 
 class AIChatPage extends StatefulWidget {
   const AIChatPage({super.key});
@@ -25,16 +31,20 @@ class _AIChatPageState extends State<AIChatPage>
   String? _selectedVideoDeviceId;
   bool _isLoadingDevices = false;
 
+  // Audio devices
+  List<MediaDeviceInfo> _audioInputDevices = [];
+  List<MediaDeviceInfo> _audioOutputDevices = [];
+  String? _selectedAudioInputId;
+  String? _selectedAudioOutputId;
+
   // Video stream variables
   MediaStream? _localVideoStream;
-  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final List<RTCVideoRenderer> _aiStreamRenderers = List.generate(
     8, // 8 AI streams for 3x3 grid (1 user + 8 AI = 9 total)
     (index) => RTCVideoRenderer(),
   );
 
   // WebRTC connection status
-  bool _isConnectedToServer = false;
   bool _isConnecting = false;
 
   // Connection settings and logs
@@ -43,6 +53,32 @@ class _AIChatPageState extends State<AIChatPage>
   String _userId = '';
   int _connectionCount = 0;
   final List<String> _connectionLogs = [];
+  // AI services selections
+  final Map<String, Map<String, bool>> _aiServices = {
+    'vision': {
+      'object_detection': false,
+      'image_classification': false,
+      'image_segmentation': false,
+      'interactive_segmentation': false,
+      'hand_landmark_detection': false,
+      'gesture_recognition': false,
+      'image_embedding': false,
+      'face_detection': false,
+      'face_landmark_detection': false,
+      'face_stylization': false,
+      'pose_landmark_detection': false,
+      'image_generation': false,
+    },
+    'nlp': {
+      'text_classification': false,
+      'text_embedding': false,
+      'language_detector': false,
+    },
+    'audio': {
+      'audio_classification': false,
+    }
+  };
+  Map<String, dynamic> get _aiServicesJson => _aiServices;
 
   @override
   void initState() {
@@ -62,8 +98,6 @@ class _AIChatPageState extends State<AIChatPage>
 
   @override
   void dispose() {
-    _webrtcService.dispose();
-    _localRenderer.dispose();
     for (final renderer in _aiStreamRenderers) {
       renderer.dispose();
     }
@@ -71,7 +105,6 @@ class _AIChatPageState extends State<AIChatPage>
   }
 
   Future<void> _initializeRenderers() async {
-    await _localRenderer.initialize();
     for (final renderer in _aiStreamRenderers) {
       await renderer.initialize();
     }
@@ -99,6 +132,9 @@ class _AIChatPageState extends State<AIChatPage>
       await _permissionService.checkPermissions();
       await _enumerateDevices();
       await _deviceInfoService.loadDeviceAndSensorInfo();
+      if (mounted) {
+        setState(() {});
+      }
 
       if (_permissionService.permissionsChecked &&
           !_permissionService.allPermissionsGranted) {
@@ -141,6 +177,22 @@ class _AIChatPageState extends State<AIChatPage>
             ],
           ),
           actions: [
+            TextButton(
+              onPressed: () async {
+                await _permissionService.requestCameraPermission();
+                await _permissionService.checkPermissions();
+                if (mounted) setState(() {});
+              },
+              child: const Text('Allow Camera'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _permissionService.requestMicrophonePermission();
+                await _permissionService.checkPermissions();
+                if (mounted) setState(() {});
+              },
+              child: const Text('Allow Microphone'),
+            ),
             TextButton(
               onPressed: () async {
                 Navigator.of(context).pop();
@@ -186,13 +238,25 @@ class _AIChatPageState extends State<AIChatPage>
       final devices = await navigator.mediaDevices.enumerateDevices();
       final videoDevices =
           devices.where((device) => device.kind == 'videoinput').toList();
+      final audioInputs =
+          devices.where((device) => device.kind == 'audioinput').toList();
+      final audioOutputs =
+          devices.where((device) => device.kind == 'audiooutput').toList();
 
       setState(() {
         _videoDevices = videoDevices;
+        _audioInputDevices = audioInputs;
+        _audioOutputDevices = audioOutputs;
         _isLoadingDevices = false;
 
         if (videoDevices.isNotEmpty && _selectedVideoDeviceId == null) {
           _selectedVideoDeviceId = videoDevices.first.deviceId;
+        }
+        if (audioInputs.isNotEmpty && _selectedAudioInputId == null) {
+          _selectedAudioInputId = audioInputs.first.deviceId;
+        }
+        if (audioOutputs.isNotEmpty && _selectedAudioOutputId == null) {
+          _selectedAudioOutputId = audioOutputs.first.deviceId;
         }
       });
     } catch (e) {
@@ -221,7 +285,7 @@ class _AIChatPageState extends State<AIChatPage>
 
       final stream = await navigator.mediaDevices.getUserMedia(constraints);
       _localVideoStream = stream;
-      _localRenderer.srcObject = stream;
+      _webrtcService.localRenderer.srcObject = stream;
       setState(() {});
     } catch (e) {
       print('Error starting local video: $e');
@@ -240,13 +304,25 @@ class _AIChatPageState extends State<AIChatPage>
     if (_localVideoStream != null) {
       _localVideoStream!.getTracks().forEach((track) => track.stop());
       _localVideoStream = null;
-      _localRenderer.srcObject = null;
+      _webrtcService.localRenderer.srcObject = null;
       setState(() {});
     }
   }
 
+  Future<void> _setAudioOutput(String? deviceId) async {
+    if (deviceId == null) return;
+    try {
+      await _webrtcService.localRenderer.audioOutput(deviceId);
+      setState(() {
+        _selectedAudioOutputId = deviceId;
+      });
+    } catch (e) {
+      // ignore errors on unsupported platforms
+    }
+  }
+
   void _toggleConnection() async {
-    if (_isConnectedToServer) {
+    if (_webrtcService.webSocketService.isConnected) {
       await _disconnectFromServer();
     } else {
       await _connectToServer();
@@ -271,7 +347,6 @@ class _AIChatPageState extends State<AIChatPage>
 
       if (success) {
         setState(() {
-          _isConnectedToServer = true;
           _isConnecting = false;
         });
         _addSystemMessage('Connected to AI server successfully!');
@@ -280,6 +355,20 @@ class _AIChatPageState extends State<AIChatPage>
 
         // Start local video when connected
         await _startLocalVideo();
+
+        // Send selected AI services over DataChannel when available
+        try {
+          await _webrtcService.createOffer(); // ensure pc has datachannel
+        } catch (_) {}
+        final dc = _webrtcService.dataChannel;
+        if (dc != null && dc.state.toString().contains('open')) {
+          final payload = {
+            'type': 'ai_services',
+            'data': _aiServicesJson,
+            'timestamp': DateTime.now().toIso8601String(),
+          };
+          dc.send(RTCDataChannelMessage(payload.toString()));
+        }
       } else {
         setState(() {
           _isConnecting = false;
@@ -299,9 +388,6 @@ class _AIChatPageState extends State<AIChatPage>
     try {
       await _webrtcService.disconnectFromSignalingServer();
       await _stopLocalVideo();
-      setState(() {
-        _isConnectedToServer = false;
-      });
       _addSystemMessage('Disconnected from AI server');
     } catch (e) {
       _addSystemMessage('Disconnection error: $e');
@@ -343,7 +429,7 @@ class _AIChatPageState extends State<AIChatPage>
         // User video stream (top-left)
         _buildVideoTile(
           'User Stream',
-          _localRenderer,
+          _webrtcService.localRenderer,
           _localVideoStream != null,
           isUserStream: true,
         ),
@@ -362,84 +448,100 @@ class _AIChatPageState extends State<AIChatPage>
 
   Widget _buildVideoTile(String title, RTCVideoRenderer renderer, bool isActive,
       {required bool isUserStream}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black87,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isUserStream ? Colors.blue : Colors.purple,
-          width: 2,
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VideoFullscreenPage(
+              title: title,
+              renderer: isUserStream ? _webrtcService.localRenderer : renderer,
+              isActive: isActive,
+            ),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isUserStream ? Colors.blue : Colors.purple,
+            width: 2,
+          ),
         ),
-      ),
-      child: Stack(
-        children: [
-          // Video content
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: isActive
-                ? RTCVideoView(
-                    renderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                : Container(
-                    color: Colors.black54,
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            isUserStream ? Icons.person : Icons.psychology,
-                            size: 32,
-                            color: isUserStream ? Colors.blue : Colors.purple,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            isUserStream ? 'No Camera' : 'AI Processing',
-                            style: TextStyle(
+        child: Stack(
+          children: [
+            // Video content
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: isActive
+                  ? RTCVideoView(
+                      renderer,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    )
+                  : Container(
+                      color: Colors.black54,
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              isUserStream ? Icons.person : Icons.psychology,
+                              size: 32,
                               color: isUserStream ? Colors.blue : Colors.purple,
-                              fontSize: 12,
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 8),
+                            Text(
+                              isUserStream ? 'No Camera' : 'AI Processing',
+                              style: TextStyle(
+                                color:
+                                    isUserStream ? Colors.blue : Colors.purple,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+            ),
+            // Title overlay
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
                   ),
-          ),
-          // Title overlay
-          Positioned(
-            top: 8,
-            left: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-          ),
-          // Status indicator
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: isActive ? Colors.green : Colors.grey,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+            // Status indicator
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: isActive ? Colors.green : Colors.grey,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -484,7 +586,7 @@ class _AIChatPageState extends State<AIChatPage>
                             width: 12,
                             height: 12,
                             decoration: BoxDecoration(
-                              color: _isConnectedToServer
+                              color: _webrtcService.webSocketService.isConnected
                                   ? Colors.green
                                   : Colors.grey,
                               shape: BoxShape.circle,
@@ -492,16 +594,18 @@ class _AIChatPageState extends State<AIChatPage>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isConnectedToServer ? 'Connected' : 'Disconnected',
+                            _webrtcService.webSocketService.isConnected
+                                ? 'Connected'
+                                : 'Disconnected',
                             style: TextStyle(
-                              color: _isConnectedToServer
+                              color: _webrtcService.webSocketService.isConnected
                                   ? Colors.green
                                   : Colors.grey,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                           const SizedBox(width: 16),
-                          if (_isConnectedToServer &&
+                          if (_webrtcService.webSocketService.isConnected &&
                               _webrtcService.webSocketService.serverName !=
                                   null)
                             Row(
@@ -524,27 +628,7 @@ class _AIChatPageState extends State<AIChatPage>
                   ),
                 ),
                 // Connection button
-                ElevatedButton.icon(
-                  onPressed: _isConnecting ? null : _toggleConnection,
-                  icon: _isConnecting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          _isConnectedToServer ? Icons.link_off : Icons.link),
-                  label: Text(_isConnecting
-                      ? 'Connecting...'
-                      : _isConnectedToServer
-                          ? 'Disconnect'
-                          : 'Connect'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        _isConnectedToServer ? Colors.red : Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
+                const SizedBox.shrink(),
               ],
             ),
           ),
@@ -556,357 +640,85 @@ class _AIChatPageState extends State<AIChatPage>
               child: Column(
                 children: [
                   // Connection Settings Section (moved first)
-                  CollapsibleSection(
-                    title: 'Connection Settings',
-                    icon: Icons.settings_ethernet,
-                    headerColor: Colors.orange.shade50,
-                    backgroundColor: Colors.orange.shade50.withOpacity(0.3),
-                    initiallyExpanded: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: _serverUrl,
-                                decoration: const InputDecoration(
-                                  labelText: 'Server URL',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _serverUrl = value;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: _roomId,
-                                decoration: const InputDecoration(
-                                  labelText: 'Room ID',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _roomId = value;
-                                  });
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: _userId,
-                                decoration: const InputDecoration(
-                                  labelText: 'User ID',
-                                  border: OutlineInputBorder(),
-                                  hintText: 'Auto-generated if empty',
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _userId = value;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.grey.shade300),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Connection Count',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600,
-                                    ),
-                                  ),
-                                  Text(
-                                    '$_connectionCount',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  ConnectionSettingsSection(
+                    serverUrl: _serverUrl,
+                    roomId: _roomId,
+                    userId: _userId,
+                    connectionCount: _connectionCount,
+                    onServerUrlChanged: (value) =>
+                        setState(() => _serverUrl = value),
+                    onRoomIdChanged: (value) => setState(() => _roomId = value),
+                    onUserIdChanged: (value) => setState(() => _userId = value),
                   ),
 
                   // Device Settings Section (moved after connection)
-                  CollapsibleSection(
-                    title: 'Device Settings',
-                    icon: Icons.devices,
-                    headerColor: Colors.green.shade50,
-                    backgroundColor: Colors.green.shade50.withOpacity(0.3),
-                    initiallyExpanded: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Video Device Selection',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade800,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (_isLoadingDevices)
-                          const Center(child: CircularProgressIndicator())
-                        else
-                          DropdownButtonFormField<String>(
-                            value: _selectedVideoDeviceId,
-                            decoration: const InputDecoration(
-                              labelText: 'Select Camera',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: _videoDevices.map((device) {
-                              return DropdownMenuItem(
-                                value: device.deviceId,
-                                child: Text(device.label.isNotEmpty
-                                    ? device.label
-                                    : 'Camera ${_videoDevices.indexOf(device) + 1}'),
-                              );
-                            }).toList(),
-                            onChanged: (String? newValue) {
-                              setState(() {
-                                _selectedVideoDeviceId = newValue;
-                              });
-                              if (_localVideoStream != null) {
-                                _stopLocalVideo();
-                                _startLocalVideo();
-                              }
-                            },
-                          ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: _enumerateDevices,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Refresh Devices'),
-                            ),
-                            const SizedBox(width: 12),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                // TODO: Implement device testing
-                              },
-                              icon: const Icon(Icons.play_arrow),
-                              label: const Text('Test Camera'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  DeviceSettingsSection(
+                    isLoadingDevices: _isLoadingDevices,
+                    videoDevices: _videoDevices,
+                    audioInputDevices: _audioInputDevices,
+                    audioOutputDevices: _audioOutputDevices,
+                    selectedVideoDeviceId: _selectedVideoDeviceId,
+                    selectedAudioInputId: _selectedAudioInputId,
+                    selectedAudioOutputId: _selectedAudioOutputId,
+                    onRefreshDevices: _enumerateDevices,
+                    onVideoChanged: (String? newValue) {
+                      setState(() {
+                        _selectedVideoDeviceId = newValue;
+                      });
+                      if (_localVideoStream != null) {
+                        _stopLocalVideo();
+                        _startLocalVideo();
+                      }
+                    },
+                    onAudioInputChanged: (String? newValue) {
+                      setState(() {
+                        _selectedAudioInputId = newValue;
+                      });
+                    },
+                    onAudioOutputChanged: (String? newValue) {
+                      _setAudioOutput(newValue);
+                    },
+                    deviceInfo: _deviceInfoService.deviceInfo,
+                    sensors: _deviceInfoService.availableSensors,
                   ),
 
                   // AI Agent Models Section
-                  CollapsibleSection(
-                    title: 'AI Agent Models',
-                    icon: Icons.psychology,
-                    headerColor: Colors.purple.shade50,
-                    backgroundColor: Colors.purple.shade50.withOpacity(0.3),
-                    initiallyExpanded: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          height: 180,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            children: [
-                              _buildAIModelCard(
-                                'GPT-4 Vision',
-                                'Advanced multimodal AI model for video analysis',
-                                'Active',
-                                Colors.green,
-                                Icons.visibility,
-                              ),
-                              const SizedBox(width: 12),
-                              _buildAIModelCard(
-                                'Claude 3 Opus',
-                                'High-performance reasoning and analysis',
-                                'Active',
-                                Colors.green,
-                                Icons.psychology,
-                              ),
-                              const SizedBox(width: 12),
-                              _buildAIModelCard(
-                                'Gemini Pro',
-                                'Google\'s multimodal AI for real-time processing',
-                                'Standby',
-                                Colors.orange,
-                                Icons.auto_awesome,
-                              ),
-                              const SizedBox(width: 12),
-                              _buildAIModelCard(
-                                'Custom Vision Model',
-                                'Specialized video processing neural network',
-                                'Training',
-                                Colors.blue,
-                                Icons.tune,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                // TODO: Implement model management
-                              },
-                              icon: const Icon(Icons.add),
-                              label: const Text('Add Model'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.purple,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                // TODO: Implement model configuration
-                              },
-                              icon: const Icon(Icons.settings),
-                              label: const Text('Configure'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  AIModelsSection(
+                    onAddModel: () {
+                      // TODO: Implement model management
+                    },
+                    onConfigure: () {
+                      // TODO: Implement model configuration
+                    },
+                  ),
+
+                  // AI Services Section
+                  AIServicesSection(
+                    selections: _aiServices,
+                    onChanged: (category, key, value) {
+                      setState(() {
+                        _aiServices[category]?[key] = value;
+                      });
+                    },
                   ),
 
                   // Video Grid Section
-                  CollapsibleSection(
-                    title: 'Video Processing Grid',
-                    icon: Icons.grid_view,
-                    headerColor: Colors.blue.shade50,
-                    backgroundColor: Colors.blue.shade50.withOpacity(0.3),
-                    initiallyExpanded: true,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '3x3 Video Grid - User stream and AI processing streams',
-                                style: TextStyle(
-                                  color: Colors.grey.shade700,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                            Switch(
-                              value: _localVideoStream != null,
-                              onChanged: (value) {
-                                if (value) {
-                                  _startLocalVideo();
-                                } else {
-                                  _stopLocalVideo();
-                                }
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Camera',
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          height: 400,
-                          child: _buildVideoGrid(),
-                        ),
-                      ],
-                    ),
+                  VideoGridSection(
+                    cameraOn: _localVideoStream != null,
+                    onToggleCamera: (value) {
+                      if (value) {
+                        _startLocalVideo();
+                      } else {
+                        _stopLocalVideo();
+                      }
+                    },
+                    grid: _buildVideoGrid(),
                   ),
 
                   // Connection Logs Section
-                  CollapsibleSection(
-                    title: 'Connection Logs',
-                    icon: Icons.info_outline,
-                    headerColor: Colors.red.shade50,
-                    backgroundColor: Colors.red.shade50.withOpacity(0.3),
-                    initiallyExpanded: false,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Real-time connection and system messages',
-                                style: TextStyle(
-                                  color: Colors.grey.shade700,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: _clearConnectionLogs,
-                              child: const Text('Clear Logs'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          height: 120,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: _connectionLogs.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No connection logs yet',
-                                    style: TextStyle(color: Colors.grey),
-                                  ),
-                                )
-                              : ListView.builder(
-                                  itemCount: _connectionLogs.length,
-                                  itemBuilder: (context, index) {
-                                    final log = _connectionLogs[
-                                        _connectionLogs.length - 1 - index];
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 2),
-                                      child: Text(
-                                        log,
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            fontFamily: 'monospace'),
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ],
-                    ),
+                  ConnectionLogsSection(
+                    logs: _connectionLogs,
+                    onClear: _clearConnectionLogs,
                   ),
                 ],
               ),
@@ -914,86 +726,31 @@ class _AIChatPageState extends State<AIChatPage>
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAIModelCard(String name, String description, String status,
-      Color statusColor, IconData icon) {
-    return Container(
-      width: 320,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.shade100,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isConnecting ? null : _toggleConnection,
+        icon: _isConnecting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
-                child: Icon(icon, color: statusColor, size: 24),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        status,
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 14,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+              )
+            : Icon(_webrtcService.webSocketService.isConnected
+                ? Icons.link_off
+                : Icons.link),
+        label: Text(
+          _isConnecting
+              ? 'Connecting...'
+              : _webrtcService.webSocketService.isConnected
+                  ? 'Disconnect'
+                  : 'Connect',
+        ),
+        backgroundColor: _webrtcService.webSocketService.isConnected
+            ? Colors.red
+            : Colors.blue,
+        foregroundColor: Colors.white,
       ),
     );
   }

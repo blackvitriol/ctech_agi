@@ -32,7 +32,6 @@ class DeviceInfoService {
       // Get device info
       final deviceInfo = DeviceInfoPlugin();
       if (kIsWeb) {
-        // Web platform
         final webInfo = await deviceInfo.webBrowserInfo;
         _deviceInfo = {
           'platform': 'Web',
@@ -40,9 +39,15 @@ class DeviceInfoService {
           'userAgent': webInfo.userAgent,
           'appVersion': webInfo.appVersion,
           'appName': webInfo.appName,
-          'platform': webInfo.platform,
+          'platformName': webInfo.platform,
           'vendor': webInfo.vendor,
           'language': webInfo.language,
+          'product': webInfo.product,
+          'productSub': webInfo.productSub,
+          'vendorSub': webInfo.vendorSub,
+          'hardwareConcurrency': webInfo.hardwareConcurrency,
+          'maxTouchPoints': webInfo.maxTouchPoints,
+          'deviceMemoryGB': webInfo.deviceMemory,
         };
       }
 

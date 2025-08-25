@@ -12,20 +12,20 @@ class AIInterfacePage extends StatefulWidget {
   State<AIInterfacePage> createState() => _AIInterfacePageState();
 }
 
-class _AIInterfacePageState extends State<AIInterfacePage> {
+class _AIInterfacePageState extends State<AIInterfacePage>
+    with AutomaticKeepAliveClientMixin {
   late WebRTCService _webrtcService;
   late PermissionService _permissionService;
   final DeviceInfoService _deviceInfoService = DeviceInfoService();
 
   // Webcam selection variables
-  List<MediaDeviceInfo> _videoDevices = [];
   String? _selectedVideoDeviceId;
-  bool _isLoadingDevices = false;
-
   // Chat variables
   final TextEditingController _textController = TextEditingController();
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
+  bool _isLoadingDevices = false;
+  List<MediaDeviceInfo> _videoDevices = [];
 
   // Connection is managed in AI Backend page
 
@@ -39,7 +39,6 @@ class _AIInterfacePageState extends State<AIInterfacePage> {
 
   @override
   void dispose() {
-    _webrtcService.dispose();
     _textController.dispose();
     super.dispose();
   }
@@ -182,37 +181,31 @@ class _AIInterfacePageState extends State<AIInterfacePage> {
     }
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     if (_textController.text.trim().isEmpty) return;
 
-    final message = ChatMessage(
-      text: _textController.text.trim(),
-      isUser: true,
-      timestamp: DateTime.now(),
-    );
+    final text = _textController.text.trim();
 
     setState(() {
-      _messages.add(message);
-      _isTyping = true;
+      _messages.add(ChatMessage(
+        text: text,
+        isUser: true,
+        timestamp: DateTime.now(),
+      ));
+      _isTyping = false;
     });
 
     _textController.clear();
 
-    // TODO: Send message to AI server via WebRTC
-    // For now, simulate AI response
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _isTyping = false;
-          _messages.add(ChatMessage(
-            text:
-                'Message received: "${message.text}". AI processing in progress...',
-            isUser: false,
-            timestamp: DateTime.now(),
-          ));
-        });
-      }
-    });
+    final ok = await _webrtcService.sendChatMessage(text);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to send. DataChannel not open.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // No connection controls in this page
@@ -243,6 +236,7 @@ class _AIInterfacePageState extends State<AIInterfacePage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     // Debug: Print current connection state
     // Connection managed in AI Backend page
 
@@ -437,6 +431,9 @@ class _AIInterfacePageState extends State<AIInterfacePage> {
       ),
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }
 
 class ChatMessage {

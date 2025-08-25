@@ -7,6 +7,7 @@ class CollapsibleSection extends StatefulWidget {
   final IconData? icon;
   final Color? headerColor;
   final Color? backgroundColor;
+  final Widget? trailing;
 
   const CollapsibleSection({
     super.key,
@@ -16,6 +17,7 @@ class CollapsibleSection extends StatefulWidget {
     this.icon,
     this.headerColor,
     this.backgroundColor,
+    this.trailing,
   });
 
   @override
@@ -110,6 +112,10 @@ class _CollapsibleSectionState extends State<CollapsibleSection>
                       ),
                     ),
                   ),
+                  if (widget.trailing != null) ...[
+                    const SizedBox(width: 8),
+                    widget.trailing!,
+                  ],
                   AnimatedRotation(
                     turns: _isExpanded ? 0.5 : 0.0,
                     duration: const Duration(milliseconds: 300),

@@ -27,7 +27,7 @@ dependencies:
   sensors_plus: ^4.0.2
 
   # Device information and specifications (web compatible)
-  device_info_plus: ^10.1.0
+  device_info_plus: ^11.5.0
   package_info_plus: ^8.0.2
 
   # Web-specific packages
